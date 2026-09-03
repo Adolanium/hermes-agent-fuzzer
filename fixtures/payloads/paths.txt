@@ -1,0 +1,12 @@
+../
+../../
+..\..\
+/etc/passwd
+C:\Windows\System32
+file:///C:/Windows/win.ini
+\\localhost\c$
+./././.
+~/.hermes/config.yaml
+/dev/null
+NUL
+CON

@@ -1,0 +1,22 @@
+{
+  "target": {
+    "remote": "https://github.com/NousResearch/hermes-agent.git",
+    "branch": "main",
+    "dir": "_targets/hermes-agent",
+    "cloneReference": null
+  },
+  "campaign": {
+    "defaultActions": 50,
+    "workers": 1,
+    "hangMs": 20000,
+    "bootMs": 180000,
+    "actionTimeoutMs": 800,
+    "replayTimeoutMs": 4000,
+    "screenshotEvery": 5,
+    "perfWarnMs": 5000,
+    "reduceBudgetMs": 900000,
+    "reduceMaxReplays": 40,
+    "fetchIntervalMs": 3600000,
+    "screenshotDepth": 3
+  }
+}

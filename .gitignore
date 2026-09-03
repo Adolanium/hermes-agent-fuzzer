@@ -1,0 +1,11 @@
+node_modules/
+dist/
+_targets/
+/artifacts/
+fuzzer.config.json
+*.log
+.env
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+

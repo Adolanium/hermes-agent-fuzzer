@@ -1,0 +1,37 @@
+{
+  "name": "hermes-agent-fuzzer",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Private robustness campaigns for Hermes Agent Desktop. Isolated launches, replayable findings, human inbox.",
+  "bin": {
+    "fuzz": "./dist/cli.js"
+  },
+  "scripts": {
+    "fuzz": "tsx src/cli.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "playwright": "^1.55.1",
+    "seedrandom": "^3.0.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.18.0",
+    "@types/seedrandom": "^3.0.8",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.2": true
+  }
+}
