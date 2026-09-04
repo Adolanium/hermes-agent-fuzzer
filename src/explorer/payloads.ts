@@ -47,7 +47,3 @@ export function pickPayload(rng: SeededRng): string {
   }
   return rng.pick(cached)
 }
-
-export function resetPayloadCache(): void {
-  cached = null
-}

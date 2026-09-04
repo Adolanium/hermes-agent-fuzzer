@@ -1,4 +1,4 @@
-import { HASH_ROUTES, SETTINGS_HASHES, SKILLS_HASHES, type ModelView, type RecordedAction, type UiSnapshot } from '../types.ts'
+import { SETTINGS_HASHES, SKILLS_HASHES, type ModelView, type RecordedAction, type UiSnapshot } from '../types.ts'
 import type { SeededRng } from '../rng.ts'
 import { pickRandomAction, type PickContext } from './random.ts'
 
@@ -66,10 +66,6 @@ export function pickModelAction(ctx: PickContext, triedEdges: Set<string>): Reco
     }
   }
   return null
-}
-
-export function allModelHashes(): readonly string[] {
-  return HASH_ROUTES
 }
 
 export function pickGuidedOrRandom(ctx: PickContext, triedEdges: Set<string>, rng: SeededRng): RecordedAction {

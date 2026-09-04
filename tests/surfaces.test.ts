@@ -4,35 +4,26 @@ import {
   pickConfigMutant,
   resolveEpisodeProfile,
   resolveReplayMutant,
-  surfaceInventory,
   windowsForEpisode,
 } from '../src/explorer/surfaces.ts'
 import { looksLikeOnboarding, previewBody } from '../src/driver/a11y.ts'
 import { looksLikeAssistantReply, noReplyFailure } from '../src/oracle/detect.ts'
-import { HASH_ROUTES, PLUGIN_HASHES, SETTINGS_HASHES, SKILLS_HASHES } from '../src/types.ts'
+import { HASH_ROUTES, PLUGIN_HASHES, SETTINGS_HASHES, SKILLS_HASHES, WARMUP_ROUTES } from '../src/types.ts'
 
 describe('surface inventory', () => {
-  it('covers every app route, settings tab, skills tab, and extra window', () => {
-    const inventory = surfaceInventory()
+  it('warms up every app route, settings tab, skills tab, and plugin', () => {
     for (const route of HASH_ROUTES) {
-      expect(inventory.routes).toContain(route)
+      expect(WARMUP_ROUTES).toContain(route)
     }
     for (const tab of SETTINGS_HASHES) {
-      expect(inventory.settingsTabs).toContain(tab)
+      expect(WARMUP_ROUTES).toContain(tab)
     }
     for (const tab of SKILLS_HASHES) {
-      expect(inventory.skillsTabs).toContain(tab)
+      expect(WARMUP_ROUTES).toContain(tab)
     }
     for (const plugin of PLUGIN_HASHES) {
-      expect(inventory.routes).toContain(plugin)
+      expect(WARMUP_ROUTES).toContain(plugin)
     }
-    expect(inventory.workflows).toContain('onboarding')
-    expect(inventory.windows).toEqual(['main', 'hud', 'quick', 'overlay', 'wake'])
-    expect(inventory.oracles).toContain('no-reply')
-    expect(inventory.workflows).toContain('chat-submit')
-    expect(inventory.workflows).toContain('settings-save')
-    expect(inventory.workflows).toContain('palette')
-    expect(inventory.pageActions.length).toBeGreaterThan(5)
   })
 
   it('rotates extra windows and config mutants by seed', () => {

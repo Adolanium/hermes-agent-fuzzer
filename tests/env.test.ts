@@ -10,9 +10,11 @@ describe('stripCredentials', () => {
       HERMES_HOME: 'C:\\Users\\me\\AppData\\Local\\hermes',
       HERMES_DESKTOP_DEV_SERVER: 'http://127.0.0.1:5174',
       DISPLAY: ':0',
+      XDG_RUNTIME_DIR: '/run/user/1000',
     })
     expect(clean.PATH).toBe('C:\\Windows')
     expect(clean.DISPLAY).toBe(':0')
+    expect(clean.XDG_RUNTIME_DIR).toBe('/run/user/1000')
     expect(clean.OPENAI_API_KEY).toBeUndefined()
     expect(clean.HERMES_HOME).toBeUndefined()
     expect(clean.HERMES_DESKTOP_DEV_SERVER).toBeUndefined()

@@ -1,30 +1,18 @@
-import {
-  SETTINGS_HASHES,
-  SKILLS_HASHES,
-  WARMUP_ROUTES,
-  type FailureClass,
-  type LaunchProfile,
-  type WindowKind,
-} from '../types.ts'
-
-export const ALL_WINDOWS: readonly WindowKind[] = ['main', 'hud', 'quick', 'overlay', 'wake']
+import type { LaunchProfile, WindowKind } from '../types.ts'
 
 export const CONFIG_MUTANTS = ['sane', 'broken-yaml', 'missing-provider', 'huge-context', 'bad-url', 'auto-approvals'] as const
 
 export type ConfigMutant = (typeof CONFIG_MUTANTS)[number]
 
-export const WORKFLOW_NAMES = [
-  'palette',
-  'new-session',
-  'shortcuts',
-  'page-actions',
-  'resize',
-  'chat-submit',
-  'settings-save',
-  'onboarding',
-] as const
-
-export type WorkflowName = (typeof WORKFLOW_NAMES)[number]
+export type WorkflowName =
+  | 'palette'
+  | 'new-session'
+  | 'shortcuts'
+  | 'page-actions'
+  | 'resize'
+  | 'chat-submit'
+  | 'settings-save'
+  | 'onboarding'
 
 export const PAGE_ACTIONS: ReadonlyArray<{ hash: string; names: readonly string[] }> = [
   { hash: '/cron', names: ['New', 'Create', 'Add job', 'Add'] },
@@ -39,41 +27,6 @@ export const PAGE_ACTIONS: ReadonlyArray<{ hash: string; names: readonly string[
   { hash: '/settings?tab=about', names: ['Copy', 'Check'] },
   { hash: '/skills?tab=mcp', names: ['Add', 'New', 'Connect'] },
 ]
-
-export const REQUIRED_ORACLES: readonly FailureClass[] = [
-  'process-exit',
-  'pageerror',
-  'crash',
-  'hang',
-  'error-boundary',
-  'uncaught-main',
-  'alert',
-  'frozen-ui',
-  'boot-timeout',
-  'no-reply',
-]
-
-export function surfaceInventory(): {
-  windows: readonly WindowKind[]
-  routes: readonly string[]
-  settingsTabs: readonly string[]
-  skillsTabs: readonly string[]
-  workflows: readonly WorkflowName[]
-  oracles: readonly FailureClass[]
-  configMutants: readonly ConfigMutant[]
-  pageActions: readonly string[]
-} {
-  return {
-    windows: ALL_WINDOWS,
-    routes: WARMUP_ROUTES,
-    settingsTabs: SETTINGS_HASHES,
-    skillsTabs: SKILLS_HASHES,
-    workflows: WORKFLOW_NAMES,
-    oracles: REQUIRED_ORACLES,
-    configMutants: CONFIG_MUTANTS,
-    pageActions: PAGE_ACTIONS.map((item) => item.hash),
-  }
-}
 
 export function windowsForEpisode(seed: number): WindowKind[] {
   const n = Math.abs(seed) % 5

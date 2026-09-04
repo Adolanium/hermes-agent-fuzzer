@@ -236,21 +236,3 @@ export function deleteInternalFindings(): number {
     db.close()
   }
 }
-
-export function updateFindingStatus(id: string, status: FindingStatus, actionCount?: number): void {
-  const db = openDb()
-  try {
-    if (actionCount === undefined) {
-      db.prepare('UPDATE findings SET status = ?, updated_at = ? WHERE id = ?').run(status, new Date().toISOString(), id)
-    } else {
-      db.prepare('UPDATE findings SET status = ?, action_count = ?, updated_at = ? WHERE id = ?').run(
-        status,
-        actionCount,
-        new Date().toISOString(),
-        id,
-      )
-    }
-  } finally {
-    db.close()
-  }
-}
