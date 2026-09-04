@@ -57,7 +57,7 @@ function distReady(desktopRoot: string): boolean {
   )
 }
 
-export function ensureBuilt(target: TargetInfo, skipBuild: boolean): void {
+export function ensureBuilt(target: TargetInfo, skipBuild: boolean, requireMatchingBuild = false): void {
   const current: BuildStamp = {
     sha: target.sha,
     node: process.version,
@@ -76,6 +76,7 @@ export function ensureBuilt(target: TargetInfo, skipBuild: boolean): void {
     return
   }
   if (skipBuild) {
+    if (requireMatchingBuild && !same) throw new Error('Recorded target has no matching build stamp. Run without --skip-build.')
     if (!distReady(target.desktopRoot)) {
       throw new Error(`Desktop dist missing at ${target.desktopRoot}/dist. Run prepare without --skip-build.`)
     }

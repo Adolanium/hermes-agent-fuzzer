@@ -1,19 +1,15 @@
 #!/usr/bin/env node
-import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 import { writeInbox } from './campaign/inbox.ts'
 import { parseDuration, parseWindowsFlag, prepareTarget, runCampaign } from './campaign/run.ts'
 import { isLaunchProfile, loadConfig } from './config.ts'
-import { resolveReplayMutant } from './explorer/surfaces.ts'
+import { readManifest } from './record/manifest.ts'
 import { logError, logInfo } from './log.ts'
 import { replayArtifact } from './record/replay.ts'
 import { readActions } from './record/actions.ts'
 import { writeMinimizedActions } from './artifacts/write.ts'
-import { updateFindingStatus } from './findings/store.ts'
-import { fingerprintOf } from './findings/fingerprint.ts'
-import type { Failure, LaunchProfile } from './types.ts'
-import { replayActionsOnFreshApp } from './campaign/episode.ts'
+import type { LaunchProfile } from './types.ts'
 import { cheapCuts, ddmin } from './reduce/ddmin.ts'
 import { fuzzerVersion } from './paths.ts'
 
@@ -115,7 +111,7 @@ async function main(): Promise<void> {
 
   if (args.command === 'run') {
     const durationRaw = flagString(args.flags, 'duration')
-    await runCampaign({
+    const result = await runCampaign({
       config,
       profile,
       durationMs: durationRaw ? parseDuration(durationRaw) : null,
@@ -130,6 +126,7 @@ async function main(): Promise<void> {
       reduce: !flagBool(args.flags, 'no-reduce'),
       workers: 1,
     })
+    process.exitCode = result.exitCode
     return
   }
 
@@ -138,8 +135,12 @@ async function main(): Promise<void> {
     if (!dir) {
       throw new Error('replay requires an artifact directory')
     }
-    const target = await prepareTarget(config, flagBool(args.flags, 'skip-fetch'), flagBool(args.flags, 'skip-build'))
-    const ok = await replayArtifact({
+    const manifest = readManifest(path.resolve(dir))
+    if (manifest.remote !== config.target.remote) throw new Error('Artifact remote does not match configured target')
+    readActions(path.join(path.resolve(dir), flagBool(args.flags, 'minimized') ? 'actions.min.json' : 'actions.json'))
+    const target = await prepareTarget(config, flagBool(args.flags, 'skip-fetch'), flagBool(args.flags, 'skip-build'),
+      flagBool(args.flags, 'allow-drift') ? undefined : manifest.sha)
+    const result = await replayArtifact({
       config,
       target,
       artifactDir: path.resolve(dir),
@@ -147,9 +148,7 @@ async function main(): Promise<void> {
       allowDrift: flagBool(args.flags, 'allow-drift'),
       unsafeSurfaces: flagBool(args.flags, 'unsafe-surfaces'),
     })
-    if (!ok) {
-      process.exitCode = 2
-    }
+    process.exitCode = result.status === 'matched' ? 0 : result.status === 'runner-error' || result.status === 'diverged' ? 1 : 2
     return
   }
 
@@ -158,26 +157,14 @@ async function main(): Promise<void> {
     if (!dir) {
       throw new Error('reduce requires an artifact directory')
     }
-    const target = await prepareTarget(config, flagBool(args.flags, 'skip-fetch'), flagBool(args.flags, 'skip-build'))
-    const actions = readActions(path.join(dir, 'actions.json'))
-    const manifestRaw: unknown = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'))
-    if (typeof manifestRaw !== 'object' || manifestRaw === null || !('failure' in manifestRaw)) {
-      throw new Error('manifest.json missing failure')
-    }
-    const failureUnknown = (manifestRaw as { failure: unknown }).failure
-    if (typeof failureUnknown !== 'object' || failureUnknown === null) {
-      throw new Error('manifest.json failure is invalid')
-    }
-    const failure = failureUnknown as Failure
-    const record = manifestRaw as Record<string, unknown>
-    const replayProfile =
-      typeof record.profile === 'string' && isLaunchProfile(record.profile) ? record.profile : profile
-    const replaySeed = typeof record.seed === 'number' ? record.seed : 0
-    const replayMutant = resolveReplayMutant(
-      replaySeed,
-      replayProfile,
-      typeof record.mutant === 'string' ? record.mutant : undefined,
-    )
+    const artifactDir = path.resolve(dir)
+    const manifest = readManifest(artifactDir)
+    if (manifest.remote !== config.target.remote) throw new Error('Artifact remote does not match configured target')
+    const actions = readActions(path.join(artifactDir, 'actions.json'))
+    const target = await prepareTarget(config, flagBool(args.flags, 'skip-fetch'), flagBool(args.flags, 'skip-build'),
+      flagBool(args.flags, 'allow-drift') ? undefined : manifest.sha)
+    const replayOptions = { config, target, artifactDir, minimized: false,
+      allowDrift: flagBool(args.flags, 'allow-drift'), unsafeSurfaces: flagBool(args.flags, 'unsafe-surfaces') }
     const started = Date.now()
     let replays = 0
     const pred = async (subset: typeof actions) => {
@@ -185,20 +172,15 @@ async function main(): Promise<void> {
         return false
       }
       replays += 1
-      const result = await replayActionsOnFreshApp({
-        config,
-        target,
-        profile: replayProfile,
-        mutant: replayMutant,
-        actions: subset,
-        unsafeSurfaces: flagBool(args.flags, 'unsafe-surfaces'),
-      })
-      return result.reproduced.some((f) => f.class === failure.class)
+      const result = await replayArtifact(replayOptions, subset, false)
+      if (result.status === 'runner-error') throw new Error(result.message)
+      return result.status === 'matched'
     }
-    if (!(await pred(actions))) {
+    const original = await replayArtifact(replayOptions, actions)
+    replays += 1
+    if (original.status !== 'matched') {
       logError('original sequence did not reproduce')
-      updateFindingStatus(fingerprintOf(failure).slice(0, 12), 'flaky')
-      process.exitCode = 2
+      process.exitCode = original.status === 'runner-error' || original.status === 'diverged' ? 1 : 2
       return
     }
     let best = actions
@@ -209,9 +191,14 @@ async function main(): Promise<void> {
       }
     }
     best = await ddmin(best, pred)
-    writeMinimizedActions(path.resolve(dir), best)
-    updateFindingStatus(fingerprintOf(failure).slice(0, 12), 'reproducible', best.length)
-    logInfo('wrote minimized actions', { count: best.length, dir })
+    // A final confirmation is outside the search budget and verifies the saved candidate.
+    const confirmed = await replayArtifact(replayOptions, best)
+    if (confirmed.status !== 'matched') {
+      process.exitCode = confirmed.status === 'runner-error' || confirmed.status === 'diverged' ? 1 : 2
+      return
+    }
+    writeMinimizedActions(artifactDir, best, target.sha === manifest.sha)
+    logInfo('reduction complete', { count: best.length, dir, verifiedAtRecordedSha: target.sha === manifest.sha })
     return
   }
 

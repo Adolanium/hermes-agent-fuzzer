@@ -60,7 +60,11 @@ export type ActionLocator =
       window: WindowKind
     }
 
-export type RecordedAction =
+export type RecordedAction = RecordedActionBody & {
+  outcome?: { ok: boolean }
+}
+
+type RecordedActionBody =
   | {
       type: 'click'
       t: number

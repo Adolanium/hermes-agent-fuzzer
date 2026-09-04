@@ -14,14 +14,14 @@ export function renderInbox(): string {
     '',
     `Updated: ${new Date().toISOString()}`,
     '',
-    '| id | class | hits | status | route | message | artifact |',
-    '| --- | --- | --- | --- | --- | --- | --- |',
+    '| id | class | hits | status | replay matches | route | message | artifact |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
   ]
   for (const finding of findings) {
     const msg = finding.message.replace(/\|/g, '/').slice(0, 80)
     const related = finding.relatedTo ? ` (related ${finding.relatedTo})` : ''
     lines.push(
-      `| ${finding.id} | ${finding.class} | ${finding.hitCount} | ${finding.status}${related} | ${finding.route} | ${msg} | ${finding.artifactDir} |`,
+      `| ${finding.id} | ${finding.class} | ${finding.hitCount} | ${finding.status}${related} | ${finding.replayMatches}/${finding.replayAttempts} | ${finding.route} | ${msg} | ${finding.artifactDir} |`,
     )
   }
   lines.push('')

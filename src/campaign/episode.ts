@@ -4,7 +4,7 @@ import { writeFindingArtifact, writeMinimizedActions } from '../artifacts/write.
 import type { FuzzerConfig } from '../config.ts'
 import { startJsCoverage, stopJsCoverage, writeCoverageReport } from '../coverage/v8.ts'
 import { snapshotAll } from '../driver/a11y.ts'
-import { composerSendable, submitComposer, waitForComposer } from '../driver/chat.ts'
+import { composerSendable, waitForComposer } from '../driver/chat.ts'
 import { closeApp, launchDesktop, openAuxWindows, waitReady, type LaunchedApp } from '../driver/electron.ts'
 import { evaluateWithHangBudget, performAction } from '../driver/perform.ts'
 import { actionKey, hashState, saveGraph, visitState, type CoverageGraph } from '../explorer/coverage.ts'
@@ -14,7 +14,8 @@ import { pickPayload } from '../explorer/payloads.ts'
 import { pickConfigMutant, resolveEpisodeProfile, type ConfigMutant } from '../explorer/surfaces.ts'
 import { runOnboardingWorkflow, runSurfaceWorkflows } from '../explorer/workflows.ts'
 import { isFuzzerInternalError } from '../findings/internal.ts'
-import { upsertFinding, updateFindingStatus } from '../findings/store.ts'
+import { sequenceHash } from '../findings/fingerprint.ts'
+import { recordReplayAttempt, upsertFinding } from '../findings/store.ts'
 import { logInfo, logWarn } from '../log.ts'
 import { startMockServer, type MockServer } from '../mock/server.ts'
 import {
@@ -31,6 +32,7 @@ import {
 import { cheapCuts, ddmin } from '../reduce/ddmin.ts'
 import { SeededRng } from '../rng.ts'
 import { createSandbox, prepareProfileConfig, removeSandbox, sandboxLooksIsolated, type Sandbox } from '../sandbox.ts'
+import { actionWindow, executeReplay, replayResult, type ReplayResult } from '../record/result.ts'
 import { cheapSoftMinimize } from '../reduce/soft.ts'
 import { findPackagedBinary } from '../target/electron-binary.ts'
 import { buildAppEnv } from '../target/launch.ts'
@@ -53,6 +55,7 @@ export type EpisodeOptions = {
 export type EpisodeResult = {
   seed: number
   actionCount: number
+  successfulActions: number
   failures: Failure[]
   artifactDir: string | null
 }
@@ -79,6 +82,7 @@ export async function runEpisode(opts: EpisodeOptions): Promise<EpisodeResult> {
   assertSandboxIsolation(sandbox)
   let mock: MockServer | null = null
   let launched: LaunchedApp | null = null
+  let finalizing = false
   const rng = new SeededRng(opts.seed)
   const tried = new Set<string>()
   const triedEdges = new Set<string>()
@@ -106,8 +110,10 @@ export async function runEpisode(opts: EpisodeOptions): Promise<EpisodeResult> {
       await waitReady(launched.main, opts.config.campaign.bootMs, {
         leaveOnboarding: profile === 'no-provider',
       })
-    } catch {
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error
       const failure = bootTimeoutFailure()
+      finalizing = true
       return await finishWithFailure({
         opts,
         sandbox,
@@ -186,7 +192,10 @@ export async function runEpisode(opts: EpisodeOptions): Promise<EpisodeResult> {
     let misses = 0
     for (let i = 0; i < opts.actions; i += 1) {
       if (launched.closed) {
-        break
+        finalizing = true
+        return await finishWithFailure({ opts, sandbox, launched, mock, actions, snapshots, shots, profile, mutant,
+          failures: [{ class: 'process-exit', severity: 'hard', message: 'Electron closed unexpectedly',
+            route: snapshots.find((snapshot) => snapshot.window === 'main')?.route }] })
       }
       snapshots = await snapshotAll(launched.pages, opts.unsafeSurfaces)
       const mainSnap = snapshots.find((s) => s.window === 'main') ?? snapshots[0]
@@ -261,6 +270,7 @@ export async function runEpisode(opts: EpisodeOptions): Promise<EpisodeResult> {
       }
       seenSoft.push(...soft.filter((f) => f.class !== 'perf'))
       if (hard) {
+        finalizing = true
         return await finishWithFailure({
           opts,
           sandbox,
@@ -311,6 +321,7 @@ export async function runEpisode(opts: EpisodeOptions): Promise<EpisodeResult> {
       alerts: keptSoft.filter((f) => f.class === 'alert').length,
     })
     if (keptSoft.length > 0) {
+      finalizing = true
       return await finishWithFailure({
         opts,
         sandbox,
@@ -327,27 +338,25 @@ export async function runEpisode(opts: EpisodeOptions): Promise<EpisodeResult> {
 
     await teardown({ launched, mock, sandbox, keep: opts.keepSandbox })
     saveGraph(opts.graph)
-    return { seed: opts.seed, actionCount: actions.length, failures: [], artifactDir: null }
+    return { seed: opts.seed, actionCount: actions.length, successfulActions: actions.filter((action) => action.outcome?.ok).length, failures: [], artifactDir: null }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const failure: Failure = {
-      class: message.startsWith('hang:') ? 'hang' : 'pageerror',
-      severity: 'hard',
-      message,
-      stack: error instanceof Error ? error.stack : undefined,
+    if (launched && !finalizing) {
+      // A driver operation can fail because the renderer crashed. Require an app signal
+      // before classifying it as a finding; exceptions alone remain runner errors.
+      const oracle = await pollOracles({ launched, hermesHome: sandbox.hermesHome, snapshots,
+        hangMs: opts.config.campaign.hangMs, previousShotB64: null }).catch(() => null)
+      if (oracle?.failures.some((failure) => failure.severity === 'hard')) {
+        try {
+          return await finishWithFailure({ opts, sandbox, launched, mock, actions, snapshots, shots,
+            profile, mutant, failures: oracle.failures })
+        } catch (finishError) {
+          await teardown({ launched, mock, sandbox, keep: opts.keepSandbox })
+          throw finishError
+        }
+      }
     }
-    return await finishWithFailure({
-      opts,
-      sandbox,
-      launched,
-      mock,
-      actions,
-      snapshots,
-      shots,
-      failures: [failure],
-      profile,
-      mutant,
-    })
+    await teardown({ launched, mock, sandbox, keep: opts.keepSandbox })
+    throw error
   }
 }
 
@@ -380,7 +389,7 @@ async function finishWithFailure(input: {
       keep: input.opts.keepSandbox,
     })
     saveGraph(input.opts.graph)
-    return { seed: input.opts.seed, actionCount: input.actions.length, failures: [], artifactDir: null }
+    return { seed: input.opts.seed, actionCount: input.actions.length, successfulActions: input.actions.filter((action) => action.outcome?.ok).length, failures: [], artifactDir: null }
   }
   const primary = kept[0] ?? failure
   if (input.launched && !input.launched.main.isClosed()) {
@@ -390,13 +399,12 @@ async function finishWithFailure(input: {
       // already gone
     }
   }
-  const artifact = writeFindingArtifact({
+  const artifactInput = {
     target: input.opts.target,
     profile: input.profile,
     mutant: input.mutant,
     seed: input.opts.seed,
     actions: input.actions,
-    failure: primary,
     snapshots: input.snapshots,
     stdout: input.launched?.stdout.join('') ?? '',
     stderr: input.launched?.stderr.join('') ?? '',
@@ -405,7 +413,11 @@ async function finishWithFailure(input: {
     pageErrors: input.launched?.pageErrors ?? [],
     screenshots: input.shots,
     hermesHome: input.sandbox.hermesHome,
-  })
+    windows: input.opts.extraWindows,
+    campaign: input.opts.config.campaign,
+    unsafeSurfaces: input.opts.unsafeSurfaces,
+  }
+  const artifact = writeFindingArtifact({ ...artifactInput, failure: primary })
   const stored = upsertFinding({
     failure: primary,
     artifactDir: artifact.dir,
@@ -414,28 +426,32 @@ async function finishWithFailure(input: {
   })
   logInfo('wrote finding', { dir: artifact.dir, duplicate: stored.duplicate, class: primary.class })
   for (const extra of kept.slice(1)) {
+    const extraArtifact = writeFindingArtifact({ ...artifactInput, failure: extra })
     const extraStored = upsertFinding({
       failure: extra,
-      artifactDir: artifact.dir,
+      artifactDir: extraArtifact.dir,
       actionCount: input.actions.length,
       status: 'new',
     })
-    logInfo('wrote finding', { dir: artifact.dir, duplicate: extraStored.duplicate, class: extra.class })
+    logInfo('wrote finding', { dir: extraArtifact.dir, duplicate: extraStored.duplicate, class: extra.class })
   }
 
   if (input.opts.reduce && primary.severity === 'hard' && input.actions.length > 1 && !stored.duplicate) {
-    const minimized = await minimizeFinding(input.opts, input.actions, primary, input.profile, input.mutant)
+    const minimized = await minimizeFinding(input.opts, input.actions, primary, input.profile, input.mutant, artifact.dir)
     if (minimized) {
-      writeMinimizedActions(artifact.dir, minimized)
-      updateFindingStatus(stored.finding.id, 'reproducible', minimized.length)
-    } else {
-      updateFindingStatus(stored.finding.id, 'flaky')
+      const confirmed = await replayActionsOnFreshApp({ config: input.opts.config, target: input.opts.target,
+        profile: input.profile, mutant: input.mutant, actions: minimized, expected: primary,
+        windows: input.opts.extraWindows, unsafeSurfaces: input.opts.unsafeSurfaces })
+      recordReplayAttempt({ failure: primary, artifactDir: artifact.dir, targetSha: input.opts.target.sha,
+        sequenceHash: sequenceHash(JSON.stringify(minimized)), actionCount: minimized.length, result: confirmed })
+      if (confirmed.status === 'runner-error') throw new Error(confirmed.message)
+      if (confirmed.status === 'matched') writeMinimizedActions(artifact.dir, minimized)
+      else writeMinimizedActions(artifact.dir, minimized, false)
     }
-  } else if (primary.severity === 'soft' && input.actions.length > 1 && !stored.duplicate) {
+  } else if (input.opts.reduce && primary.severity === 'soft' && input.actions.length > 1 && !stored.duplicate) {
     const minimized = cheapSoftMinimize(primary, input.actions)
     if (minimized) {
-      writeMinimizedActions(artifact.dir, minimized)
-      updateFindingStatus(stored.finding.id, 'new', minimized.length)
+      writeMinimizedActions(artifact.dir, minimized, false)
     }
   }
 
@@ -449,47 +465,9 @@ async function finishWithFailure(input: {
   return {
     seed: input.opts.seed,
     actionCount: input.actions.length,
+    successfulActions: input.actions.filter((action) => action.outcome?.ok).length,
     failures: kept,
     artifactDir: artifact.dir,
-  }
-}
-
-async function replaySequence(
-  opts: EpisodeOptions,
-  sequence: RecordedAction[],
-  expect: Failure,
-  profile: LaunchProfile,
-  mutant: ConfigMutant,
-): Promise<boolean> {
-  const sandbox = createSandbox('reduce')
-  assertSandboxIsolation(sandbox)
-  let mock: MockServer | null = null
-  let launched: LaunchedApp | null = null
-  try {
-    if (profile === 'mock-backend' || profile === 'ui-only') {
-      mock = await startMockServer({ unsafeTools: opts.unsafeSurfaces })
-    }
-    prepareProfileConfig(sandbox, profile, mock?.url ?? null, mutant)
-    const env = buildAppEnv({ sandbox, target: opts.target, profile })
-    launched = await launchDesktop({ target: opts.target, profile, env })
-    await waitReady(launched.main, opts.config.campaign.bootMs)
-    for (const action of sequence) {
-      await performAction(launched, action, opts.config.campaign.replayTimeoutMs)
-    }
-    const snapshots = await snapshotAll(launched.pages, opts.unsafeSurfaces)
-    const oracle = await pollOracles({
-      launched,
-      hermesHome: sandbox.hermesHome,
-      snapshots,
-      hangMs: opts.config.campaign.hangMs,
-      previousShotB64: null,
-    })
-    return oracle.failures.some((f) => f.class === expect.class)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return expect.class === 'hang' ? message.startsWith('hang:') : expect.class === 'boot-timeout'
-  } finally {
-    await teardown({ launched, mock, sandbox, keep: false })
   }
 }
 
@@ -499,6 +477,7 @@ async function minimizeFinding(
   failure: Failure,
   profile: LaunchProfile,
   mutant: ConfigMutant,
+  artifactDir: string,
 ): Promise<RecordedAction[] | null> {
   const started = Date.now()
   let replays = 0
@@ -511,7 +490,13 @@ async function minimizeFinding(
     }
     replays += 1
     logInfo('reduce replay', { actions: subset.length, replay: replays })
-    return replaySequence(opts, subset, failure, profile, mutant)
+    const result = await replayActionsOnFreshApp({ config: opts.config, target: opts.target, profile, mutant,
+      actions: subset, expected: failure, unsafeSurfaces: opts.unsafeSurfaces, windows: opts.extraWindows })
+    recordReplayAttempt({ failure, artifactDir, targetSha: opts.target.sha,
+      sequenceHash: sequenceHash(JSON.stringify(subset)), actionCount: subset.length, result,
+      allowPromotion: subset === actions })
+    if (result.status === 'runner-error') throw new Error(result.message)
+    return result.status === 'matched'
   }
 
   if (!(await pred(actions))) {
@@ -534,11 +519,14 @@ export async function replayActionsOnFreshApp(input: {
   mutant?: ConfigMutant
   actions: RecordedAction[]
   unsafeSurfaces: boolean
-}): Promise<{ reproduced: Failure[] }> {
+  expected: Failure
+  windows?: WindowKind[]
+}): Promise<ReplayResult> {
   const sandbox = createSandbox('replay')
   assertSandboxIsolation(sandbox)
   let mock: MockServer | null = null
   let launched: LaunchedApp | null = null
+  let step = 0
   try {
     if (input.profile === 'mock-backend' || input.profile === 'ui-only') {
       mock = await startMockServer({ unsafeTools: input.unsafeSurfaces })
@@ -546,25 +534,50 @@ export async function replayActionsOnFreshApp(input: {
     prepareProfileConfig(sandbox, input.profile, mock?.url ?? null, input.mutant)
     const env = buildAppEnv({ sandbox, target: input.target, profile: input.profile })
     launched = await launchDesktop({ target: input.target, profile: input.profile, env })
-    await waitReady(launched.main, input.config.campaign.bootMs)
-    for (const action of input.actions) {
-      await performAction(launched, action, input.config.campaign.replayTimeoutMs)
+    const app = launched
+    let snapshots: UiSnapshot[] = []
+    const observe = async () => {
+      // Poll before inspecting widgets: crashed or hung renderers may not permit a snapshot.
+      let oracle = await pollOracles({ launched: app, hermesHome: sandbox.hermesHome, snapshots,
+        hangMs: input.config.campaign.hangMs, previousShotB64: null })
+      if (oracle.failures.some((f) => f.severity === 'hard')) return oracle.failures
+      snapshots = await snapshotAll(app.pages, input.unsafeSurfaces)
+      oracle = await pollOracles({ launched: app, hermesHome: sandbox.hermesHome, snapshots,
+        hangMs: input.config.campaign.hangMs, previousShotB64: null })
+      return oracle.failures
     }
-    const snapshots = await snapshotAll(launched.pages, input.unsafeSurfaces)
-    const oracle = await pollOracles({
-      launched,
-      hermesHome: sandbox.hermesHome,
-      snapshots,
-      hangMs: input.config.campaign.hangMs,
-      previousShotB64: null,
+    try {
+      await waitReady(app.main, input.config.campaign.bootMs, { leaveOnboarding: input.profile === 'no-provider' })
+    } catch (error) {
+      const failures = await observe()
+      if (failures.some((f) => f.severity === 'hard')) return replayResult(input.expected, failures, 0)
+      if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error
+      return replayResult(input.expected, [bootTimeoutFailure()], 0)
+    }
+    const windows = [...new Set([...(input.windows ?? []), ...input.actions.map(actionWindow)])]
+      .filter((window) => window !== 'main')
+    if (windows.length > 0) {
+      await openAuxWindows(app, windows)
+      await new Promise((resolve) => setTimeout(resolve, 800))
+    }
+    const result = await executeReplay({
+      expected: input.expected, actions: input.actions, observe,
+      perform: async (action) => {
+        step += 1
+        const window = actionWindow(action)
+        if (!app.pages.has(window)) return { ok: false, error: `Required window is missing: ${window}` }
+        return performAction(app, action, input.config.campaign.replayTimeoutMs, false)
+      },
     })
-    if (mock && mock.receivedPrompts.length > 0 && !launched.main.isClosed()) {
-      const body = await evaluateWithHangBudget(launched.main, input.config.campaign.hangMs).catch(() => '')
-      if (!looksLikeAssistantReply(body)) {
-        oracle.failures.push(noReplyFailure(mock.receivedPrompts.length, '/'))
+    if (result.status === 'matched' || result.status === 'diverged' || result.reproduced.some((f) => f.severity === 'hard')) return result
+    if (input.expected.class === 'no-reply' && mock && mock.receivedPrompts.length > 0 && !app.main.isClosed()) {
+      if (!(await waitForMockReply(app, input.config.campaign.hangMs))) {
+        return replayResult(input.expected, [...result.reproduced, noReplyFailure(mock.receivedPrompts.length, '/')], step)
       }
     }
-    return { reproduced: oracle.failures }
+    return result
+  } catch (error) {
+    return { status: 'runner-error', reproduced: [], step, message: error instanceof Error ? error.message : String(error) }
   } finally {
     await teardown({ launched, mock, sandbox, keep: false })
   }
@@ -650,16 +663,13 @@ async function pokeChat(
   mock: MockServer | null,
   extraPayloads: string[] = [],
 ): Promise<void> {
-  await performAction(
-    launched,
+  for (const action of [
     { type: 'press', t: Date.now(), seedStep: actions.length, key: 'Escape', window: 'main' },
-    timeoutMs,
-  )
-  await performAction(
-    launched,
     { type: 'navigate', t: Date.now(), seedStep: actions.length, hash: '/', window: 'main' },
-    timeoutMs,
-  )
+  ] satisfies RecordedAction[]) {
+    actions.push(action)
+    await performAction(launched, action, timeoutMs)
+  }
   const ready = await waitForComposer(launched.main, 20000)
   if (!ready || !(await composerSendable(launched.main).catch(() => false))) {
     logWarn('composer not sendable, skipping chat poke')
@@ -679,23 +689,11 @@ async function pokeChat(
       value: payload,
     }
     actions.push(type)
-    const inserted = await submitComposer(launched.main, payload)
-    if (!inserted) {
-      logWarn('composer submit missed', { payload: payload.slice(0, 40) })
-      await performAction(launched, type, timeoutMs)
-      await performAction(
-        launched,
-        { type: 'press', t: Date.now(), seedStep: actions.length, key: 'Enter', window: 'main' },
-        timeoutMs,
-      )
-    } else {
-      actions.push({
-        type: 'click',
-        t: Date.now(),
-        seedStep: actions.length,
-        locator: { strategy: 'css', css: '[data-slot="composer-root"] button[type="submit"]', nth: 0, window: 'main' },
-      })
-    }
+    const inserted = await performAction(launched, type, timeoutMs)
+    if (!inserted.ok) logWarn('composer insert missed', { payload: payload.slice(0, 40) })
+    const submit: RecordedAction = { type: 'press', t: Date.now(), seedStep: actions.length, key: 'Enter', window: 'main' }
+    actions.push(submit)
+    await performAction(launched, submit, timeoutMs)
     const before = mock?.receivedPrompts.length ?? 0
     const wait: RecordedAction = {
       type: 'wait',

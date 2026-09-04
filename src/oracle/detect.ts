@@ -3,6 +3,7 @@ import * as path from 'node:path'
 
 import type { LaunchedApp } from '../driver/electron.ts'
 import { evaluateWithHangBudget } from '../driver/perform.ts'
+import { routeFromUrl } from '../driver/a11y.ts'
 import type { Failure, FailureClass, UiSnapshot } from '../types.ts'
 import { isDesktopFaultLine, isInterestingAlert, isInterestingBodyFault, isInterestingConsoleError } from './signals.ts'
 
@@ -93,9 +94,10 @@ export function classifyFaults(input: {
   previousShotB64?: string | null
   currentShotB64?: string | null
   hangMessage?: string
+  route?: string
 }): Failure[] {
   const state = emptyOracle()
-  const route = input.main?.route
+  const route = input.route ?? input.main?.route
 
   if (input.closed) {
     add(state, { class: 'process-exit', severity: 'hard', message: 'Electron closed unexpectedly', route })
@@ -217,6 +219,7 @@ export async function pollOracles(input: {
     previousShotB64: input.previousShotB64,
     currentShotB64: input.takeScreenshot ? currentShotB64 : undefined,
     hangMessage,
+    route: routeFromUrl(input.launched.main.url()),
   })
   for (const failure of failures) {
     add(state, failure)

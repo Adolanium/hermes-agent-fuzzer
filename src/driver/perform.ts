@@ -93,7 +93,13 @@ async function clickLocator(loc: Locator, timeoutMs: number, button: 'left' | 'r
   }
 }
 
-export async function performAction(launched: LaunchedApp, action: RecordedAction, timeoutMs: number): Promise<PerformResult> {
+export async function performAction(launched: LaunchedApp, action: RecordedAction, timeoutMs: number, record = true): Promise<PerformResult> {
+  const result = await performActionRaw(launched, action, timeoutMs)
+  if (record) action.outcome = { ok: result.ok }
+  return result
+}
+
+async function performActionRaw(launched: LaunchedApp, action: RecordedAction, timeoutMs: number): Promise<PerformResult> {
   const started = Date.now()
   const page = pageFor(launched, windowOf(action))
   if (page.isClosed()) {
@@ -148,7 +154,7 @@ export async function performAction(launched: LaunchedApp, action: RecordedActio
         await clickWithFallback(page, action, timeoutMs, 'right')
         break
       case 'wait':
-        await new Promise((resolve) => setTimeout(resolve, Math.min(action.ms, 400)))
+        await new Promise((resolve) => setTimeout(resolve, action.ms))
         break
     }
     return { ok: true, elapsedMs: Date.now() - started }
