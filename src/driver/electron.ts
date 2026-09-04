@@ -1,10 +1,9 @@
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
-import * as path from 'node:path'
 import { _electron, type ElectronApplication, type Page } from 'playwright'
 
 import { evalInPage } from './eval.ts'
-import { logInfo, logWarn } from '../log.ts'
+import { logInfo } from '../log.ts'
 import { findPackagedBinary, packagedBinaryPath, resolveElectronBinary } from '../target/electron-binary.ts'
 import type { LaunchProfile, TargetInfo, WindowKind } from '../types.ts'
 
@@ -268,12 +267,4 @@ export function killTree(pid: number): void {
       // gone
     }
   }
-}
-
-export function collectPidsFromHome(hermesHome: string): number[] {
-  const logs = path.join(hermesHome, 'logs')
-  if (!fs.existsSync(logs)) {
-    return []
-  }
-  return []
 }

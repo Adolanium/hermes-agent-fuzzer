@@ -63,7 +63,6 @@ export async function runCampaign(opts: RunOptions): Promise<CampaignResult> {
     const graph = loadGraph()
     const deadline = opts.durationMs === null ? null : Date.now() + opts.durationMs
     let lastFetch = Date.now()
-    let episodes = 0
     let findings = 0
 
     const pruned = deleteInternalFindings()
@@ -98,7 +97,6 @@ export async function runCampaign(opts: RunOptions): Promise<CampaignResult> {
         reduce: opts.reduce,
         graph,
       })
-      episodes += 1
       summary.episodes += 1
       summary.actions += result.actionCount
       summary.successfulActions += result.successfulActions
@@ -116,13 +114,10 @@ export async function runCampaign(opts: RunOptions): Promise<CampaignResult> {
         states: cov.states,
         artifact: result.artifactDir,
       })
-      if (opts.seed !== null && opts.durationMs === null) {
-        break
-      }
-    } while (deadline === null ? episodes < 1 : Date.now() < deadline)
+    } while (deadline !== null && Date.now() < deadline)
 
     writeInbox()
-    logInfo('campaign end', { episodes, findings, sha: target.sha, ...coverageSummary(graph) })
+    logInfo('campaign end', { episodes: summary.episodes, findings, sha: target.sha, ...coverageSummary(graph) })
     if (summary.hardFindings === 0 && summary.successfulActions === 0) throw new Error('No UI action completed')
     summary.status = summary.hardFindings > 0 ? 'hard-findings' : 'healthy'
     summary.exitCode = summary.hardFindings > 0 ? 2 : 0

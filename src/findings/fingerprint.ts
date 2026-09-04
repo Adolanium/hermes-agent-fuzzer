@@ -102,8 +102,5 @@ export function similarAlert(a: string, b: string): boolean {
     return true
   }
   const maxLen = Math.max(a.length, b.length)
-  if (maxLen === 0) {
-    return true
-  }
   return levenshtein(a, b) / maxLen <= 0.25
 }

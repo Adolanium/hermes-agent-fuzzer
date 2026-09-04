@@ -9,7 +9,6 @@ import {
   persistableFailures,
   uniqueFailures,
 } from '../src/oracle/detect.ts'
-import { REQUIRED_ORACLES } from '../src/explorer/surfaces.ts'
 import type { FailureClass, UiSnapshot } from '../src/types.ts'
 import { isDesktopFaultLine, isInterestingAlert, isInterestingBodyFault, isInterestingConsoleError } from '../src/oracle/signals.ts'
 
@@ -56,6 +55,23 @@ describe('desktop.log faults', () => {
 })
 
 describe('failure persistence', () => {
+  it('keeps the first fault when later sources repeat it', () => {
+    const message = 'TypeError: Cannot read properties of undefined'
+    expect(classifyFaults({
+      closed: false,
+      mainGone: false,
+      pageErrors: [message, message],
+      consoleErrors: [message],
+      desktopLog: '',
+      alerts: ['Gateway connection lost', 'Gateway connection lost', 'Failed to load settings'],
+      route: '/',
+    })).toEqual([
+      { class: 'pageerror', severity: 'hard', message, stack: message, route: '/' },
+      { class: 'alert', severity: 'soft', message: 'Gateway connection lost', alertText: 'Gateway connection lost', route: '/' },
+      { class: 'alert', severity: 'soft', message: 'Failed to load settings', alertText: 'Failed to load settings', route: '/' },
+    ])
+  })
+
   it('drops perf and duplicates', () => {
     const kept = persistableFailures([
       { class: 'perf', severity: 'soft', message: 'Action took 900ms' },
@@ -138,7 +154,11 @@ describe('required oracles persist', () => {
     )
     found.add(noReplyFailure(1, '/').class)
     found.add(bootTimeoutFailure('/').class)
-    for (const cls of REQUIRED_ORACLES) {
+    const required: FailureClass[] = [
+      'process-exit', 'pageerror', 'crash', 'hang', 'error-boundary',
+      'uncaught-main', 'alert', 'frozen-ui', 'boot-timeout', 'no-reply',
+    ]
+    for (const cls of required) {
       expect(found.has(cls)).toBe(true)
     }
   })

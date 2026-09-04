@@ -1,5 +1,3 @@
-import * as fs from 'node:fs'
-
 import { writeFindingArtifact, writeMinimizedActions } from '../artifacts/write.ts'
 import type { FuzzerConfig } from '../config.ts'
 import { startJsCoverage, stopJsCoverage, writeCoverageReport } from '../coverage/v8.ts'

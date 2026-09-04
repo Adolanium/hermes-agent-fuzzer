@@ -44,10 +44,6 @@ function pointOf(action: RecordedAction): { x: number; y: number } | null {
   return null
 }
 
-async function clickAt(page: Page, x: number, y: number, button: 'left' | 'right'): Promise<void> {
-  await page.mouse.click(x, y, { button })
-}
-
 async function clickWithFallback(
   page: Page,
   action: Extract<RecordedAction, { locator: ActionLocator }>,
@@ -55,7 +51,7 @@ async function clickWithFallback(
   button: 'left' | 'right',
 ): Promise<void> {
   if (action.locator.strategy === 'xy') {
-    await clickAt(page, action.locator.x, action.locator.y, button)
+    await page.mouse.click(action.locator.x, action.locator.y, { button })
     return
   }
   const loc = locatorFor(page, action.locator)
@@ -69,7 +65,7 @@ async function clickWithFallback(
   }
   const point = pointOf(action)
   if (point) {
-    await clickAt(page, point.x, point.y, button)
+    await page.mouse.click(point.x, point.y, { button })
     return
   }
   throw new Error('click missed')

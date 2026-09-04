@@ -13,16 +13,18 @@ describe('fingerprint', () => {
     expect(stackTop5(raw).split('\n').length).toBeLessThanOrEqual(5)
   })
 
-  it('groups the same crash class and stack', () => {
+  it('groups normalized stacks but keeps different routes and classes separate', () => {
     const a: Failure = {
       class: 'pageerror',
       severity: 'hard',
       message: 'boom',
-      stack: 'Error: boom\n    at foo',
+      stack: 'Error: boom\n    at C:\\Users\\alice\\app.ts:12',
       route: '/settings',
     }
-    const b: Failure = { ...a }
+    const b: Failure = { ...a, stack: 'Error: boom\n    at /home/bob/app.ts:12' }
     expect(fingerprintOf(a)).toBe(fingerprintOf(b))
+    expect(fingerprintOf(a)).not.toBe(fingerprintOf({ ...b, route: '/' }))
+    expect(fingerprintOf(a)).not.toBe(fingerprintOf({ ...b, class: 'crash' }))
   })
 
   it('treats similar alerts as related', () => {

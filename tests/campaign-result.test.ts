@@ -29,10 +29,25 @@ beforeEach(() => {
 })
 
 describe('campaign result contract', () => {
-  it('writes a healthy result only after running an episode', async () => {
-    const result = await runCampaign(options)
+  it.each([1, null])('runs one episode without a duration, with seed %s', async (seed) => {
+    const result = await runCampaign({ ...options, seed })
     expect(result).toMatchObject({ status: 'healthy', exitCode: 0, episodes: 1, actions: 1 })
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'campaign-result.json'), 'utf8'))).toEqual(result)
+  })
+  it('counts all episodes and actions until the duration expires', async () => {
+    let now = 1000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    mocks.episode.mockImplementation(async () => {
+      now += 10
+      return { seed: 1, actionCount: 2, successfulActions: 1, failures: [], artifactDir: null }
+    })
+    try {
+      const result = await runCampaign({ ...options, durationMs: 25 })
+      expect(result).toMatchObject({ status: 'healthy', episodes: 3, actions: 6, successfulActions: 3 })
+      expect(JSON.parse(fs.readFileSync(path.join(dir, 'campaign-result.json'), 'utf8'))).toEqual(result)
+    } finally {
+      clock.mockRestore()
+    }
   })
   it('fails on hard findings but allows soft findings', async () => {
     mocks.episode.mockResolvedValueOnce({ seed: 1, actionCount: 1, successfulActions: 1, failures: [{ severity: 'hard', class: 'crash' }] })

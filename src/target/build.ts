@@ -76,7 +76,7 @@ export function ensureBuilt(target: TargetInfo, skipBuild: boolean, requireMatch
     return
   }
   if (skipBuild) {
-    if (requireMatchingBuild && !same) throw new Error('Recorded target has no matching build stamp. Run without --skip-build.')
+    if (requireMatchingBuild) throw new Error('Recorded target has no matching build stamp. Run without --skip-build.')
     if (!distReady(target.desktopRoot)) {
       throw new Error(`Desktop dist missing at ${target.desktopRoot}/dist. Run prepare without --skip-build.`)
     }

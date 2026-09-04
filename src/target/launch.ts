@@ -9,12 +9,6 @@ export function buildAppEnv(input: {
   extra?: Record<string, string>
 }): Record<string, string> {
   const clean = stripCredentials(process.env)
-  if (!clean.DISPLAY && process.env.DISPLAY) {
-    clean.DISPLAY = process.env.DISPLAY
-  }
-  if (!clean.XDG_RUNTIME_DIR && process.env.XDG_RUNTIME_DIR) {
-    clean.XDG_RUNTIME_DIR = process.env.XDG_RUNTIME_DIR
-  }
 
   const env: Record<string, string> = {
     ...clean,

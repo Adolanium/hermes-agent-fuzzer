@@ -22,11 +22,11 @@ export async function ddmin<T>(items: T[], pred: (subset: T[]) => Promise<boolea
     if (reduced) {
       continue
     }
-    for (let i = 0; i < subsets.length; i += 1) {
-      const complement = work.filter((_, index) => {
-        const start = offsetOf(subsets, i)
-        return index < start || index >= start + (subsets[i]?.length ?? 0)
-      })
+    let start = 0
+    for (const subset of subsets) {
+      const end = start + subset.length
+      const complement = work.filter((_, index) => index < start || index >= end)
+      start = end
       if (complement.length < work.length && complement.length > 0 && (await pred(complement))) {
         work = complement
         n = Math.max(n - 1, 2)
@@ -52,14 +52,6 @@ function split<T>(items: T[], n: number): T[][] {
     out.push(items.slice(i, i + size))
   }
   return out
-}
-
-function offsetOf<T>(subsets: T[][], index: number): number {
-  let offset = 0
-  for (let i = 0; i < index; i += 1) {
-    offset += subsets[i]?.length ?? 0
-  }
-  return offset
 }
 
 export function cheapCuts<T>(items: T[]): T[][] {
