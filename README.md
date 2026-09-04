@@ -10,7 +10,7 @@ This product is independent of the public Hermes Agent repository. Desktop is th
 
 Desktop is Electron 40 and React 19. First-run, chat, settings, and extra windows fail in ways unit tests miss. A locked profile, a bad `config.yaml`, or a hung renderer does not show up in a component test.
 
-This runner launches an isolated process, drives the live app, and writes an inbox. Same seed, same SHA, same failure.
+This runner launches an isolated process, drives the live app, and writes an inbox. Seeds repeat action selection; replay verifies whether the recorded actions reproduce the same failure at the recorded SHA.
 
 **Isolation is the contract.** Every episode gets a temp `HERMES_HOME` and `HERMES_DESKTOP_USER_DATA_DIR`, plus a unique `HERMES_DESKTOP_APP_NAME` so the single-instance lock cannot steal the operator's real app. Credentials are stripped from the child environment. The fuzzer never writes to `%LOCALAPPDATA%\hermes` or `%APPDATA%\Hermes`. It never commits, pushes, or edits tracked files in the Hermes checkout.
 
@@ -101,7 +101,7 @@ This is the inventory the explorer actually uses.
 
 **Workflows.** Command palette, new session, shortcuts, page actions on cron / profiles / agents / messaging / webhooks / artifacts / starmap / command-center, appearance save, chat submit, first-run onboarding, resize.
 
-**Chat.** Real keystrokes into `[data-slot="composer-rich-input"]`. `__mock_ok__` is a guaranteed reply. `__mock_500__` is a guaranteed error. Random prompts can still 500, truncate, or return long / RTL / markdown.
+**Chat.** Recorded input and Enter submission in `[data-slot="composer-rich-input"]`. `__mock_ok__` is a guaranteed reply. `__mock_500__` is a guaranteed error. Random prompts can still 500, truncate, or return long / RTL / markdown.
 
 ## How a campaign works
 
@@ -157,15 +157,42 @@ Every artifact includes:
 - `stdout.log`, `stderr.log`, `desktop.log`, `agent.log`, `pageerror.log`
 - screenshots and `state.json`
 
-Replay the recorded list. Same SHA is required unless `--allow-drift`. Replay restores the same profile and config mutant.
+Replay prepares the artifact's recorded commit automatically. `--skip-fetch` uses locally available Git objects; `--skip-build` requires a build stamp matching that commit, Node version, and lockfile. The configured target remote must match the artifact. `--allow-drift` explicitly tests the current target instead and does not promote the result as evidence for the recorded commit.
 
-Hard findings can run hierarchical delta debugging (15 minutes or 40 replays). Soft `no-reply` / `alert` findings get a cheap cut that keeps chat and navigate steps. If the original sequence does not reproduce, the finding is marked `flaky`. The artifact stays.
+New manifests record required windows, profile, config mutant, execution budgets, and whether unsafe surfaces were enabled. Replay restores onboarding behavior and records each action's success or failure. A different outcome or a missing action window stops replay with the step number. Legacy manifests remain readable, but missing execution metadata cannot be reconstructed fully. Invalid actions are rejected rather than dropped.
+
+Replay and reduction share a failure matcher using severity and the existing normalized fingerprint. Another crash of the same class does not count. Replay checks for failures before the sequence and after every action. Results are written to `replay-result.json` as `matched`, `different-failure`, `not-reproduced`, `diverged`, or `runner-error`.
+
+Hard findings can run hierarchical delta debugging with a search budget of 15 minutes or 40 replays, followed by one final confirmation. Only a confirmed sequence is saved as `actions.min.json`. Soft `no-reply` / `alert` cuts are saved as unverified `actions.candidate.json`; `--no-reduce` disables these too. A reduction against a different SHA also produces a candidate. A shorter verified sequence is retained when a later reduction produces a longer one.
+
+SQLite stores occurrences and replay attempts separately. A new duplicate does not erase confirmed status or replace a verified reproduction with an unverified shorter one. The inbox shows matches/attempts for the retained sequence at its verified SHA. A missed reproduction remains in the history; setup errors and action divergence are not treated as evidence that the original bug disappeared. Existing databases migrate automatically without fabricating historical replay counts.
+
+## Results and exit codes
+
+Each campaign writes `artifacts/campaign-result.json` with episode counts, attempted and successful action counts, hard and soft finding counts, target SHAs, timestamps, and any runner error.
+
+| Code | Campaign | Replay or reduction |
+| --- | --- | --- |
+| 0 | Completed with no hard findings; soft findings may exist | Original failure matched |
+| 1 | Setup or runner failure | Invalid artifact, setup error, or replay divergence |
+| 2 | One or more hard findings | Original failure did not reproduce, or a different failure occurred |
+
+Unexpected runner exceptions no longer become `pageerror` findings. An actual readiness timeout remains a boot-timeout finding.
 
 ## Nightly
 
 `scripts/nightly.ps1` runs an 8 hour campaign. `scripts/install-nightly-task.ps1` registers it with Task Scheduler. The machine must be logged in.
 
-Unit tests live in this repo. A short smoke job lives in `.github/workflows/smoke.yml` here only. Fail that job on hard crash or error boundary, not on alerts. Do not gate public Hermes PRs on it.
+Unit tests live in this repo. A separate Windows test launches a hidden Electron fixture, injects a renderer crash, replays and reduces it, and rejects an unrelated fault. The scheduled/manual Hermes smoke job explicitly prepares the target, fails on hard findings or runner errors, and always attempts artifact upload. These jobs live only in this repository.
+
+To run the Electron fixture locally with an installed Electron executable:
+
+```powershell
+$env:FUZZ_TEST_ELECTRON = 'C:\path\to\electron.exe'
+npx vitest run tests/electron.integration.test.ts
+```
+
+The fixture test is skipped by the normal unit suite unless that variable is set.
 
 ## Scope
 

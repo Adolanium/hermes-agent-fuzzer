@@ -20,6 +20,26 @@ jobs:
       - run: npm test
       - run: npm run typecheck
 
+  replay-regression:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Install fixture Electron
+        run: |
+          npm install --prefix artifacts/electron-fixture --no-save --package-lock=false electron@40.0.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node artifacts/electron-fixture/node_modules/electron/install.js
+      - name: Inject, replay, and reduce a renderer crash
+        run: |
+          $env:FUZZ_TEST_ELECTRON = (Resolve-Path artifacts/electron-fixture/node_modules/electron/dist/electron.exe).Path
+          npx vitest run tests/electron.integration.test.ts
+
   smoke:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: windows-latest
@@ -31,9 +51,10 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - name: Prepare isolated target
+        run: npx tsx src/cli.ts prepare
       - name: Short ui-only episode
-        run: npx tsx src/cli.ts run --profile ui-only --actions 8 --duration 3m --no-reduce --skip-fetch
-        continue-on-error: true
+        run: npx tsx src/cli.ts run --profile ui-only --actions 8 --duration 3m --no-reduce --skip-fetch --skip-build
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,6 +1,6 @@
 {
   "name": "hermes-agent-fuzzer",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Private robustness campaigns for Hermes Agent Desktop. Isolated launches, replayable findings, human inbox.",

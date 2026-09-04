@@ -38,7 +38,8 @@ function isDirty(root: string): boolean {
   return status.split(/\r?\n/).some((line) => line && !ignoredDirty(line))
 }
 
-export function ensureTarget(config: FuzzerConfig, skipFetch: boolean): TargetInfo {
+export function ensureTarget(config: FuzzerConfig, skipFetch: boolean, revision?: string): TargetInfo {
+  if (revision && !/^[a-f0-9]{40}$/i.test(revision)) throw new Error('Expected a full commit SHA')
   const root = resolveTargetDir(config)
   if (!fs.existsSync(path.join(root, '.git'))) {
     if (skipFetch) {
@@ -54,7 +55,15 @@ export function ensureTarget(config: FuzzerConfig, skipFetch: boolean): TargetIn
     }
     logInfo('fetching target', { remote: config.target.remote, branch: config.target.branch })
     git(root, ['fetch', 'origin', config.target.branch])
-    git(root, ['checkout', '--detach', `origin/${config.target.branch}`])
+  }
+
+  if (!skipFetch || revision) {
+    if (isDirty(root)) throw new Error(`Target checkout is dirty: ${root}`)
+    if (revision && !gitOk(root, ['cat-file', '-e', `${revision}^{commit}`])) {
+      if (skipFetch) throw new Error(`Recorded commit unavailable locally: ${revision}`)
+      git(root, ['fetch', 'origin', revision])
+    }
+    git(root, ['checkout', '--detach', revision ?? `origin/${config.target.branch}`])
   }
 
   const sha = git(root, ['rev-parse', 'HEAD'])

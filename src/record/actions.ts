@@ -12,10 +12,9 @@ export function readActions(file: string): RecordedAction[] {
     throw new Error(`Invalid actions file: ${file}`)
   }
   const actions: RecordedAction[] = []
-  for (const item of parsed) {
-    if (isRecordedAction(item)) {
-      actions.push(item)
-    }
+  for (const [index, item] of parsed.entries()) {
+    if (!isRecordedAction(item)) throw new Error(`Invalid action at step ${index + 1}: ${file}`)
+    actions.push(item)
   }
   return actions
 }
@@ -25,9 +24,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function isRecordedAction(value: unknown): value is RecordedAction {
-  if (!isRecord(value) || typeof value.type !== 'string' || typeof value.t !== 'number' || typeof value.seedStep !== 'number') {
+  if (!isRecord(value) || typeof value.type !== 'string' || !finite(value.t) || !integer(value.seedStep)) {
     return false
   }
+  if (value.outcome !== undefined && (!isRecord(value.outcome) || typeof value.outcome.ok !== 'boolean')) return false
+  if (value.point !== undefined && (!isRecord(value.point) || !finite(value.point.x) || !finite(value.point.y))) return false
   switch (value.type) {
     case 'click':
     case 'contextmenu':
@@ -35,23 +36,38 @@ export function isRecordedAction(value: unknown): value is RecordedAction {
     case 'type':
       return isLocator(value.locator) && typeof value.value === 'string'
     case 'press':
-      return typeof value.key === 'string'
+      return typeof value.key === 'string' && isWindowKind(value.window)
     case 'navigate':
-      return typeof value.hash === 'string'
+      return typeof value.hash === 'string' && isWindowKind(value.window)
     case 'resize':
-      return typeof value.width === 'number' && typeof value.height === 'number'
+      return integer(value.width) && value.width > 0 && integer(value.height) && value.height > 0 && isWindowKind(value.window)
     case 'wait':
-      return typeof value.ms === 'number'
+      return finite(value.ms) && value.ms >= 0
     default:
       return false
   }
 }
 
+function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) }
+function integer(value: unknown): value is number { return finite(value) && Number.isInteger(value) && value >= 0 }
+
+export function isWindowKind(value: unknown): value is import('../types.ts').WindowKind {
+  return typeof value === 'string' && ['main', 'hud', 'quick', 'overlay', 'wake', 'unknown'].includes(value)
+}
+
 function isLocator(value: unknown): value is ActionLocator {
-  if (!isRecord(value) || typeof value.strategy !== 'string' || typeof value.window !== 'string') {
+  if (!isRecord(value) || !isWindowKind(value.window)) {
     return false
   }
-  return true
+  if (value.strategy === 'xy') return finite(value.x) && finite(value.y)
+  if (!integer(value.nth)) return false
+  switch (value.strategy) {
+    case 'role': return typeof value.role === 'string' && typeof value.name === 'string'
+    case 'aria': return typeof value.name === 'string'
+    case 'testid': return typeof value.testid === 'string'
+    case 'css': return typeof value.css === 'string'
+    default: return false
+  }
 }
 
 export function actionLabel(action: RecordedAction): string {

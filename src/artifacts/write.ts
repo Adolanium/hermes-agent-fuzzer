@@ -5,7 +5,8 @@ import * as path from 'node:path'
 import { writeReproMarkdown } from './repro.ts'
 import { fingerprintOf } from '../findings/fingerprint.ts'
 import { fuzzerVersion, findingsRoot, ensureDir } from '../paths.ts'
-import { writeActions } from '../record/actions.ts'
+import { readActions, writeActions } from '../record/actions.ts'
+import type { FuzzerConfig } from '../config.ts'
 import type { ConfigMutant } from '../explorer/surfaces.ts'
 import type { Failure, LaunchProfile, RecordedAction, TargetInfo, UiSnapshot } from '../types.ts'
 
@@ -29,6 +30,9 @@ export function writeFindingArtifact(input: {
   pageErrors: string[]
   screenshots: Buffer[]
   hermesHome?: string
+  windows?: import('../types.ts').WindowKind[]
+  campaign?: FuzzerConfig['campaign']
+  unsafeSurfaces?: boolean
 }): Artifact {
   const id = fingerprintOf(input.failure).slice(0, 12)
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -36,6 +40,10 @@ export function writeFindingArtifact(input: {
   ensureDir(dir)
 
   const manifest = {
+    schemaVersion: 1,
+    windows: input.windows,
+    campaign: input.campaign,
+    unsafeSurfaces: input.unsafeSurfaces ?? false,
     id,
     sha: input.target.sha,
     remote: input.target.remote,
@@ -106,6 +114,8 @@ export function writeFindingArtifact(input: {
   return { dir, id }
 }
 
-export function writeMinimizedActions(dir: string, actions: RecordedAction[]): void {
-  writeActions(path.join(dir, 'actions.min.json'), actions)
+export function writeMinimizedActions(dir: string, actions: RecordedAction[], verified = true): void {
+  const file = path.join(dir, verified ? 'actions.min.json' : 'actions.candidate.json')
+  if (verified && fs.existsSync(file) && readActions(file).length < actions.length) return
+  writeActions(file, actions)
 }
