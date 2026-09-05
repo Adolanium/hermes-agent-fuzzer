@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300" viewBox="0 0 600 300" role="img" aria-labelledby="title desc">
+  <title id="title">Find the failure. Keep the evidence.</title>
+  <desc id="desc">Explore Hermes Desktop, capture a finding, then replay and reduce it.</desc>
+  <rect width="600" height="300" rx="12" fill="#171c22"/>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <text x="30" y="55" fill="#f4f2eb" font-size="43" font-weight="700">Find the failure.</text>
+    <text x="30" y="110" fill="#f4f2eb" font-size="43" font-weight="700">Keep the evidence.</text>
+    <text x="30" y="160" fill="#bdc5ce" font-size="22">Recorded actions, steps, and logs.</text>
+    <text x="30" y="195" fill="#bdc5ce" font-size="22">Replay at the same commit.</text>
+    <path d="M0 230H600" stroke="#353c44"/>
+    <text x="30" y="274" fill="#e9b777" font-size="21">Explore</text>
+    <text x="207" y="274" fill="#e9b777" font-size="21">Capture</text>
+    <text x="395" y="274" fill="#e9b777" font-size="21">Replay</text>
+    <path d="M128 267H169m-6-5 6 5-6 5m143 0h41m-6-5 6 5-6 5" fill="none" stroke="#6e7b89" stroke-width="1.5"/>
+  </g>
+</svg>
